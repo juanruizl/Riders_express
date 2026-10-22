@@ -75,3 +75,14 @@ def pedidos_por_rider():
                LEFT JOIN Pedido pe ON pe.id_rider = r.id_rider
                LEFT JOIN LineaPedido lp ON lp.id_pedido = pe.id_pedido
                GROUP BY r.id_rider ORDER BY pedidos DESC""").fetchall()
+
+def obtener_pedidos():
+    """lista de pedidos con el nombre del cliente, la fecha y el total"""
+    with closing(get_conn()) as conn:
+        return conn.execute(
+            """SELECT pe.id_pedido, pe.fecha, u.nombre AS cliente,
+                      COALESCE(SUM(lp.precio_unit * lp.cantidad), 0) AS total
+               FROM Pedido pe
+               JOIN Usuario u ON u.id_usuario = pe.id_usuario
+               LEFT JOIN LineaPedido lp ON lp.id_pedido = pe.id_pedido
+               GROUP BY pe.id_pedido ORDER BY pe.id_pedido""").fetchall()

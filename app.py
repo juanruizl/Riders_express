@@ -1,78 +1,139 @@
-import sqlite3
 from datetime import datetime
-from db import obtener_platos, barrio_de_plato, datos_pedido, pedidos_por_rider
+from db import (obtener_platos, obtener_usuarios, obtener_pedidos, barrio_de_plato,
+                datos_pedido, pedidos_por_rider)
 from pedidos import crear_pedido
 from rutas import cargar_grafo, dijkstra, camino, rider_mas_cercano
 from turno import planificar_turno
 
+
 def carta():
+    restaurante_actual = ""
     for p in obtener_platos():
-        print(f"{p['id_plato']}. {p['nombre']} - {p['precio']} € ({p['restaurante']})")
+        # cuando cambia el restaurante, escribimos su nombre como título
+        if p['restaurante'] != restaurante_actual:
+            restaurante_actual = p['restaurante']
+            print()
+            print("---", restaurante_actual, "---")
+        print("  ", p['id_plato'], ".", p['nombre'], "-", p['precio'], "€")
+
+
+def usuarios():
+    for u in obtener_usuarios():
+        print(u['id_usuario'], ".", u['nombre'], "-", u['barrio'], "- saldo:", u['saldo'], "€")
+
+
+def pedidos():
+    for p in obtener_pedidos():
+        print(p['id_pedido'], ".", p['fecha'], "-", p['cliente'], "-", p['total'], "€")
+
 
 def pedir(grafo):
+    usuarios()
+    id_usuario = int(input("¿Quién eres? (número): "))
+
     carta()
-    try:
-        id_usuario = int(input("Usuario (id): "))
-        lineas = []
-        while True:
-            entrada = input("Plato y cantidad, ej. '3 2' (vacío para acabar): ").split()
-            if not entrada:
-                break
-            lineas.append((int(entrada[0]), int(entrada[1])))
-        # el rider es el más cercano al restaurante del primer plato
-        minutos, id_rider, nombre = rider_mas_cercano(grafo, barrio_de_plato(lineas[0][0]))
-        id_pedido, total = crear_pedido(id_usuario, id_rider, lineas,
-                                        datetime.now().strftime("%Y-%m-%d %H:%M"))
-        print(f"Pedido {id_pedido}: {total} €, lo lleva {nombre} "
-              f"(a {minutos} min del restaurante)")
-    except (ValueError, IndexError, TypeError, sqlite3.Error) as e:
-        print("No se ha podido hacer el pedido:", e)
+    print()
+    print("Escribe el número del plato y la cantidad, por ejemplo: 3 2")
+
+    # lista de (id_plato, cantidad)
+    lineas = []
+    while True:
+        entrada = input("Plato y cantidad (vacío para acabar): ")
+        if entrada == "":
+            break
+        partes = entrada.split()
+        lineas.append((int(partes[0]), int(partes[1])))
+
+    if len(lineas) == 0:
+        print("No has pedido nada")
+        return
+
+    # el rider es el más cercano al restaurante del primer plato
+    barrio = barrio_de_plato(lineas[0][0])
+    minutos, id_rider, nombre = rider_mas_cercano(grafo, barrio)
+
+    fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
+    id_pedido, total = crear_pedido(id_usuario, id_rider, lineas, fecha)
+    print("Pedido", id_pedido, ":", total, "€, lo lleva", nombre,
+          "(a", minutos, "min del restaurante)")
+
 
 def asignar(grafo):
-    try:
-        pedido = datos_pedido(int(input("Pedido (id): ")))
-    except ValueError:
-        print("Tiene que ser un número")
-        return
+    pedidos()
+    id_pedido = int(input("¿Qué pedido? (número): "))
+    pedido = datos_pedido(id_pedido)
     if pedido is None:
         print("No existe")
         return
-    minutos, id_rider, nombre = rider_mas_cercano(grafo, pedido["restaurante"])
-    dist, previo = dijkstra(grafo, pedido["restaurante"])
-    print(f"Lo recoge {nombre}: {minutos} min hasta {pedido['restaurante']} "
-          f"+ {dist[pedido['cliente']]} min hasta el cliente = {minutos + dist[pedido['cliente']]} min")
-    print(" -> ".join(camino(previo, pedido["cliente"])))
+
+    restaurante = pedido["restaurante"]
+    cliente = pedido["cliente"]
+
+    minutos, _, nombre = rider_mas_cercano(grafo, restaurante)
+    dist, previo = dijkstra(grafo, restaurante)
+    total = minutos + dist[cliente]
+
+    print("Lo recoge", nombre, ":", minutos, "min hasta", restaurante)
+    print("Luego", dist[cliente], "min hasta el cliente. Total:", total, "min")
+    print(" -> ".join(camino(previo, cliente)))
+
 
 def ruta(grafo):
     print("Barrios:", ", ".join(sorted(grafo)))
-    origen, destino = input("Origen: "), input("Destino: ")
+    origen = input("Origen: ")
+    destino = input("Destino: ")
     if origen not in grafo or destino not in grafo:
         print("No existe")
         return
+
     dist, previo = dijkstra(grafo, origen)
-    print(f"{dist[destino]} min:", " -> ".join(camino(previo, destino)))
+    print(dist[destino], "min:", " -> ".join(camino(previo, destino)))
+
 
 def estadisticas():
     for r in pedidos_por_rider():
-        print(f"{r['nombre']}: {r['pedidos']} pedidos, {r['facturado']:.2f} €")
+        print(r['nombre'], ":", r['pedidos'], "pedidos,", round(r['facturado'], 2), "€")
+
 
 def main():
     grafo = cargar_grafo()
-    opciones = {
-        "1": ("Ver la carta",            carta),
-        "2": ("Hacer un pedido",         lambda: pedir(grafo)),
-        "3": ("Rider para un pedido",    lambda: asignar(grafo)),
-        "4": ("Ruta entre dos barrios",  lambda: ruta(grafo)),
-        "5": ("Planificar el turno",     lambda: print(planificar_turno())),
-        "6": ("Pedidos por rider",       estadisticas),
-    }
-    while True:
-        for k, (texto, _) in opciones.items():
-            print(k, texto)
-        eleccion = input("Opción (q para salir): ")
-        if eleccion == "q":
-            break
-        opciones.get(eleccion, ("", lambda: print("No existe")))[1]()
 
-if __name__ == "__main__":
-    main()
+    while True:
+        print()
+        print("1. Ver la carta")
+        print("2. Ver usuarios")
+        print("3. Ver pedidos")
+        print("4. Hacer un pedido")
+        print("5. Rider para un pedido")
+        print("6. Ruta entre dos barrios")
+        print("7. Planificar el turno")
+        print("8. Pedidos por rider")
+        print("q. Salir")
+        opcion = input("Opción: ")
+
+        try:
+            if opcion == "1":
+                carta()
+            elif opcion == "2":
+                usuarios()
+            elif opcion == "3":
+                pedidos()
+            elif opcion == "4":
+                pedir(grafo)
+            elif opcion == "5":
+                asignar(grafo)
+            elif opcion == "6":
+                ruta(grafo)
+            elif opcion == "7":
+                print(planificar_turno())
+            elif opcion == "8":
+                estadisticas()
+            elif opcion == "q":
+                break
+            else:
+                print("No existe")
+        except Exception as e:
+            print("Ha habido un error:", e)
+
+
+main()
